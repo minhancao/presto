@@ -27,6 +27,7 @@
 #include "presto_cpp/main/common/Utils.h"
 #include "presto_cpp/main/connectors/Registration.h"
 #include "presto_cpp/main/connectors/SystemConnector.h"
+#include "presto_cpp/main/common/process/IBMSignalHandler.h"
 #include "presto_cpp/main/http/HttpConstants.h"
 #include "presto_cpp/main/http/filters/AccessLogFilter.h"
 #include "presto_cpp/main/http/filters/HttpEndpointLatencyFilter.h"
@@ -259,6 +260,11 @@ void PrestoServer::run() {
   initializeThreadPools();
 
   auto catalogNames = registerVeloxConnectors(fs::path(configDirectoryPath_));
+  auto ibmSignalHandler =
+      folly::Singleton<facebook::presto::process::IBMSignalHandler>::try_get();
+  if (ibmSignalHandler) {
+    ibmSignalHandler->setPrestoServer(this);
+  }
 
   const bool bindToNodeInternalAddressOnly =
       systemConfig->httpServerBindToNodeInternalAddressOnlyEnabled();
