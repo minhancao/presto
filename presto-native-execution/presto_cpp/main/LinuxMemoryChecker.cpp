@@ -28,7 +28,9 @@ class LinuxMemoryChecker : public PeriodicMemoryChecker {
     // Find out what cgroup version (v1 or v2) we have based on the directory
     // it's mounted.
     struct stat buffer;
-    if ((stat(kCgroupV1Path, &buffer) == 0)) {
+    if ((stat(kCgroupV2MemoryCurrentPath, &buffer) == 0)) {
+      statFile_ = kCgroupV2MemoryCurrentPath;
+    } else if ((stat(kCgroupV1Path, &buffer) == 0)) {
       statFile_ = kCgroupV1Path;
     } else if ((stat(kCgroupV2Path, &buffer) == 0)) {
       statFile_ = kCgroupV2Path;
@@ -75,11 +77,27 @@ class LinuxMemoryChecker : public PeriodicMemoryChecker {
   // consistency we will match cgroup V1 and change if
   // necessary.
   int64_t systemUsedMemoryBytes() override {
-    size_t memAvailable = 0;
-    size_t memTotal = 0;
+    size_t memoryCurrentBytes = 0;
+
     size_t inactiveAnon = 0;
     size_t activeAnon = 0;
+    size_t inactiveFile = 0;
+    size_t activeFile = 0;
+    size_t unevictable = 0;
 
+    size_t memAvailable = 0;
+    size_t memTotal = 0;
+
+    // For cgroup v2, use memory.current to extract current system memory usage if it exists.
+    if (statFile_ == kCgroupV2MemoryCurrentPath) {
+      folly::gen::byLine(statFile_.c_str()) |
+          [&](const folly::StringPiece& line) -> void {
+            memoryCurrentBytes = folly::to<size_t>(line.str()); 
+      };
+      return memoryCurrentBytes;
+    }
+
+    // Use memory.stat instead for cgroup v1 and v2.
     if (statFile_ != "None") {
       folly::gen::byLine(statFile_.c_str()) |
           [&](const folly::StringPiece& line) -> void {
@@ -93,13 +111,28 @@ class LinuxMemoryChecker : public PeriodicMemoryChecker {
               extractNumericConfigValueWithRegex(line, kActiveAnonRegex);
         }
 
-        if (activeAnon != 0 && inactiveAnon != 0) {
+        if (inactiveFile == 0) {
+          inactiveFile =
+              extractNumericConfigValueWithRegex(line, kInactiveFileRegex);
+        }
+
+        if (activeFile == 0) {
+          activeFile =
+              extractNumericConfigValueWithRegex(line, kActiveFileRegex);
+        }
+
+        if (unevictable == 0) {
+          unevictable =
+              extractNumericConfigValueWithRegex(line, kUnevictableRegex);
+        }
+
+        if (activeAnon != 0 && inactiveAnon != 0 && inactiveFile != 0 && activeFile != 0 && unevictable != 0) {
           return;
         }
       };
 
       // Unit is in bytes.
-      return inactiveAnon + activeAnon;
+      return inactiveAnon + activeAnon + inactiveFile + activeFile + unevictable;
     }
 
     // Last resort use host machine info.
@@ -142,10 +175,14 @@ class LinuxMemoryChecker : public PeriodicMemoryChecker {
  private:
   const boost::regex kInactiveAnonRegex{R"!(inactive_anon\s*(\d+)\s*)!"};
   const boost::regex kActiveAnonRegex{R"!(active_anon\s*(\d+)\s*)!"};
+  const boost::regex kInactiveFileRegex{R"!(inactive_file\s*(\d+)\s*)!"};
+  const boost::regex kActiveFileRegex{R"!(active_file\s*(\d+)\s*)!"};
+  const boost::regex kUnevictableRegex{R"!(unevictable\s*(\d+)\s*)!"};
   const boost::regex kMemAvailableRegex{R"!(MemAvailable:\s*(\d+)\s*kB)!"};
   const boost::regex kMemTotalRegex{R"!(MemTotal:\s*(\d+)\s*kB)!"};
   const char* kCgroupV1Path = "/sys/fs/cgroup/memory/memory.stat";
   const char* kCgroupV2Path = "/sys/fs/cgroup/memory.stat";
+  const char* kCgroupV2MemoryCurrentPath = "/sys/fs/cgroup/memory.current";
   std::string statFile_;
 
   size_t extractNumericConfigValueWithRegex(

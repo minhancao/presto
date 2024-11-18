@@ -68,14 +68,19 @@ TEST_F(LinuxMemoryCheckerTest, basic) {
   ASSERT_NO_THROW(memChecker.stop());
 }
 
+TEST_F(LinuxMemoryCheckerTest, memoryStatFileMemoryCurrent) {
+  // Testing cgroup v2 memory.current file.
+  checkMemoryUsage("cgroupV2memory.current", 129406545920);
+}
+
 TEST_F(LinuxMemoryCheckerTest, memoryStatFileV1) {
   // Testing cgroup v1 memory.stat file.
-  checkMemoryUsage("cgroupV1memory.stat", 5136384);
+  checkMemoryUsage("cgroupV1memory.stat", 42848256);
 }
 
 TEST_F(LinuxMemoryCheckerTest, memoryStatFileV2) {
   // Testing cgroup v2 memory.stat file.
-  checkMemoryUsage("cgroupV2memory.stat", 274713448448);
+  checkMemoryUsage("cgroupV2memory.stat", 275292090368);
 }
 
 TEST_F(LinuxMemoryCheckerTest, hostMachineInfo) {
