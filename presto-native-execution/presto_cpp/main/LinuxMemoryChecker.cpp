@@ -28,9 +28,10 @@ class LinuxMemoryChecker : public PeriodicMemoryChecker {
     // Find out what cgroup version (v1 or v2) we have based on the directory
     // it's mounted.
     struct stat buffer;
-    if ((stat(kCgroupV2MemoryCurrentPath, &buffer) == 0)) {
-      statFile_ = kCgroupV2MemoryCurrentPath;
-    } else if ((stat(kCgroupV1Path, &buffer) == 0)) {
+    // if ((stat(kCgroupV2MemoryCurrentPath, &buffer) == 0)) {
+    //   statFile_ = kCgroupV2MemoryCurrentPath;
+    // } 
+    if ((stat(kCgroupV1Path, &buffer) == 0)) {
       statFile_ = kCgroupV1Path;
     } else if ((stat(kCgroupV2Path, &buffer) == 0)) {
       statFile_ = kCgroupV2Path;
@@ -89,15 +90,15 @@ class LinuxMemoryChecker : public PeriodicMemoryChecker {
     size_t memTotal = 0;
 
     // For cgroup v2, use memory.current to extract current system memory usage if it exists.
-    if (statFile_.rfind(".current")) {
-      folly::gen::byLine(statFile_.c_str()) |
-          [&](const folly::StringPiece& line) -> void {
-            if (memoryCurrentBytes == 0) {
-              memoryCurrentBytes = folly::to<size_t>(line.str()); 
-            }
-      };
-      return memoryCurrentBytes;
-    }
+    // if (statFile_.rfind(".current")) {
+    //   folly::gen::byLine(statFile_.c_str()) |
+    //       [&](const folly::StringPiece& line) -> void {
+    //         if (memoryCurrentBytes == 0) {
+    //           memoryCurrentBytes = folly::to<size_t>(line.str()); 
+    //         }
+    //   };
+    //   return memoryCurrentBytes;
+    // }
 
     // Use memory.stat instead for cgroup v1 and v2.
     if (statFile_ != "None") {
@@ -184,7 +185,7 @@ class LinuxMemoryChecker : public PeriodicMemoryChecker {
   const boost::regex kMemTotalRegex{R"!(MemTotal:\s*(\d+)\s*kB)!"};
   const char* kCgroupV1Path = "/sys/fs/cgroup/memory/memory.stat";
   const char* kCgroupV2Path = "/sys/fs/cgroup/memory.stat";
-  const char* kCgroupV2MemoryCurrentPath = "/sys/fs/cgroup/memory.current";
+  // const char* kCgroupV2MemoryCurrentPath = "/sys/fs/cgroup/memory.current";
   std::string statFile_;
 
   size_t extractNumericConfigValueWithRegex(
