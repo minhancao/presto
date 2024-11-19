@@ -89,10 +89,12 @@ class LinuxMemoryChecker : public PeriodicMemoryChecker {
     size_t memTotal = 0;
 
     // For cgroup v2, use memory.current to extract current system memory usage if it exists.
-    if (statFile_ == kCgroupV2MemoryCurrentPath) {
+    if (statFile_.rfind(".current")) {
       folly::gen::byLine(statFile_.c_str()) |
           [&](const folly::StringPiece& line) -> void {
-            memoryCurrentBytes = folly::to<size_t>(line.str()); 
+            if (memoryCurrentBytes == 0) {
+              memoryCurrentBytes = folly::to<size_t>(line.str()); 
+            }
       };
       return memoryCurrentBytes;
     }
