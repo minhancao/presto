@@ -27,13 +27,37 @@
 #include "git_build_version.h"
 #include "presto_cpp/main/PrestoServer.h"
 #include "presto_cpp/main/common/Utils.h" // For PRESTO_STARTUP_LOG.
+#include "velox/common/base/Exceptions.h"
 
 DEFINE_string(stack_dump_dir, "/tmp", "directory for stack dumping");
 
 namespace facebook::presto::process {
+namespace {
+  // Repeatedly calls for cleanOldTasks() for a while to ensure that we overcome a
+  // potential race condition where we call cleanOldTasks() before some Tasks are
+  // ready to be cleaned.
+  void waitForAllOldTasksToBeCleaned(
+    TaskManager* taskManager,
+    uint64_t maxWaitUs) {
+    taskManager->cleanOldTasks();
+
+    uint64_t waitUs = 0;
+    while (taskManager->getNumTasks() > 0) {
+      constexpr uint64_t kWaitInternalUs = 1'000;
+      std::this_thread::sleep_for(std::chrono::microseconds(kWaitInternalUs));
+      waitUs += kWaitInternalUs;
+      taskManager->cleanOldTasks();
+      if (waitUs >= maxWaitUs) {
+        break;
+      }
+    }
+  }
+}
 // Initialize the static atomic flag outside of the class.
-std::atomic<bool> IBMSignalHandler::isHandlingSignal(false);
-facebook::presto::PrestoServer* IBMSignalHandler::prestoServer_ = nullptr;
+std::atomic<bool> IBMSignalHandler::isHandlingSignal_(false);
+std::string IBMSignalHandler::signalStr_("");
+void* IBMSignalHandler::currentRip_(0);
+pid_t IBMSignalHandler::linuxTid_ = -1;
 
 // HANDPARMS
 //   signum [in]
@@ -548,9 +572,108 @@ static std::string signalToString(int signo) {
   }
 }
 
-IBMSignalHandler::IBMSignalHandler() {
+IBMSignalHandler::IBMSignalHandler() : stopCleanupThread_(false), signalReceived_(false) {
   registerSignalHandler(SIGSEGV);
   registerSignalHandler(SIGILL);
+}
+
+IBMSignalHandler::~IBMSignalHandler() {
+  stopCleanupThread_ = true;
+  cv_.notify_one();
+  if (cleanupThread_.joinable()) {
+    cleanupThread_.join();
+  }
+}
+
+// Called inside signal handler (minimal work!)
+void IBMSignalHandler::notifySignal() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    signalReceived_ = true;
+  }
+  cv_.notify_one();
+}
+
+void IBMSignalHandler::cleanupThreadFunc() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  while (!stopCleanupThread_) {
+    cv_.wait(lock, [this] { return signalReceived_ || stopCleanupThread_; });
+    if (signalReceived_) {
+      signalReceived_ = false;
+      lock.unlock();
+
+      // *** Do your task abort & delete here ***
+      if (taskManager_) {
+        // access taskManager_ safely and delete tasks as needed
+        // abortAndDeleteTasks();
+      }
+
+      lock.lock();
+      isHandlingSignal_.store(false);
+    }
+  }
+}
+
+void IBMSignalHandler::abortAndDeleteTasks(long linuxTid, int signum) {
+  LOG(INFO) << "abortAndDeleteTasks called!!!\n";
+  if (taskManager_) {
+    auto taskMap = taskManager_->tasks();
+
+    for (auto& pair : taskMap) {
+      const protocol::TaskId& prestoTaskId = pair.first;
+      std::shared_ptr<PrestoTask>& prestoTask = pair.second;
+      std::shared_ptr<facebook::velox::exec::Task>& veloxTask = prestoTask->task;
+      if (veloxTask != nullptr && veloxTask->isRunning()) {
+        for (const auto& driver : veloxTask->getDrivers()) {
+          if (driver != nullptr) {
+            auto taskThreadId = driver->state().tid.load();
+            if (linuxTid == taskThreadId) {
+              LOG(INFO) << "Requesting ABORT for task:\n";
+              LOG(INFO) << fmt::format("Presto Task ID: {}\n", prestoTaskId);
+              LOG(INFO) << fmt::format("Velox Task ID: {}\n", veloxTask->taskId());
+              LOG(INFO) << fmt::format("Query ID: {}\n", veloxTask->queryCtx()->queryId());
+              LOG(INFO) << fmt::format("Signal thread ID: {}\n", linuxTid);
+              LOG(INFO) << fmt::format("Task thread ID: {}\n", taskThreadId);
+              
+              // This is to update task to be an error task so the Presto
+              // coordinator can see it and update accordingly.
+              // auto signalStr = strsignal(signum);
+              // auto ex = std::make_exception_ptr(
+              //   std::runtime_error(fmt::format(
+              //     "Exception caused by {} signal.", 
+              //     signalStr ? signalStr : "Unknown")));
+              // taskManager_->createOrUpdateErrorTask(
+              //     veloxTask->taskId(), ex, true, 0);
+
+              // // Request abort of this task on Velox worker.
+              // veloxTask->requestAbort();
+
+              // if (!veloxTask->isRunning() && veloxTask->state() == facebook::velox::exec::TaskState::kAborted) {
+              //   LOG(INFO) << fmt::format("Task ID {} was successfully aborted!\n", veloxTask->taskId());
+              //   taskManager_->deleteTask(veloxTask->taskId(), true, true);          
+              // }
+
+              // taskManager_->deleteTask(veloxTask->taskId(), true, true);
+              // driver->closeByTask();
+
+              LOG(INFO) << fmt::format("Task status: {}\n", veloxTask->state());
+              
+              LOG(INFO) << fmt::format("PrestoTask ref count: {}\n", prestoTask.use_count());
+              LOG(INFO) << fmt::format("VeloxTask ref count: {}\n", veloxTask.use_count());
+            }
+          }
+        }
+      }
+    }
+
+    // Need to cleanup the tasks...
+    // taskManager_->setOldTaskCleanUpMs(0);
+    // taskManager_->cleanOldTasks();
+    // // waitForAllOldTasksToBeCleaned(taskManager_, 3'000'000);
+
+    // auto systemConfig = SystemConfig::instance();
+    // taskManager_->setOldTaskCleanUpMs(systemConfig->oldTaskCleanUpMs());
+  }
 }
 
 void IBMSignalHandler::registerSignalHandler(int signo) {
@@ -574,23 +697,34 @@ void IBMSignalHandler::detailedSignalHandler(
     int signum,
     siginfo_t* info,
     void* context) {
+  
   // Check if the signal handler is already being executed.
-  if (isHandlingSignal.load()) {
+  if (isHandlingSignal_.load()) {
     return;
   }
   // Signal handling is being executed, set flag to true.
-  isHandlingSignal.store(true);
+  isHandlingSignal_.store(true);
+  auto otherLinuxTid = syscall(SYS_gettid);
+  auto handler = folly::Singleton<IBMSignalHandler>::try_get();
+
+  if (handler) {
+    handler->abortAndDeleteTasks(otherLinuxTid, signum);
+  }
 
   ucontext_t* uc = reinterpret_cast<ucontext_t*>(context);
   void* rip = reinterpret_cast<void*>(uc->uc_mcontext.gregs[REG_RIP]);
 
-  LOG(INFO) << fmt::format("Signal {} received\n", signum);
+  signalStr_ = strsignal(signum);
+
+  LOG(INFO) << fmt::format("Signal {} {} received\n", signum, signalStr_);
   LOG(INFO) << fmt::format("Instruction pointer (RIP): {}\n", rip);
   LOG(INFO) << fmt::format("Faulting address (SI_ADDR): {}\n", info->si_addr);
 
   // Get process ID and thread ID.
   pid_t pid = getpid();
-  pthread_t threadId = pthread_self();
+  pthread_t posixTid = pthread_self();
+
+  LOG(INFO) << fmt::format("Linux thread ID: {}\n", otherLinuxTid);
 
   // Get current date and time.
   std::time_t now = std::time(nullptr);
@@ -599,8 +733,8 @@ void IBMSignalHandler::detailedSignalHandler(
   // Create a string stream for the filename.
   std::ostringstream oss;
   oss << FLAGS_stack_dump_dir << "/stack_dump_"
-      << std::put_time(tm_now, "%Y%m%d_%H%M%S") << "_pid" << pid << "_tid"
-      << reinterpret_cast<unsigned long>(threadId) << ".txt";
+      << std::put_time(tm_now, "%Y%m%d_%H%M%S") << "_pid" << pid << "_linux_tid"
+      << otherLinuxTid << ".txt";
 
   std::string filePathStr = oss.str();
   TrapFile trapFile(filePathStr);
@@ -620,10 +754,12 @@ void IBMSignalHandler::detailedSignalHandler(
   std::string message = fmt::format(
       "Signum received: {}\n"
       "Process id: {}\n"
-      "Thread id: {}\n",
+      "Linux Thread id: {}\n"
+      "POSIX Thread id: {}\n",
       signum,
       pid,
-      static_cast<unsigned long>(threadId));
+      otherLinuxTid,
+      static_cast<unsigned long>(posixTid));
 
   trapFile.writeToTrapFile(message);
 
@@ -636,13 +772,11 @@ void IBMSignalHandler::detailedSignalHandler(
 
   trapFile.writeToTrapFile("END: Dumping related info finished\n");
   trapFile.closeTrapFile();
+  
+  // Causes sigabort
+  // pthread_exit(nullptr);
 
-  // Signal handling is done, set flag to false.
-  isHandlingSignal.store(false);
-
-  if (prestoServer_) {
-    prestoServer_->stop();
-  }
+  VELOX_FAIL(fmt::format("Signal {} received.", signum));
 }
 
 TrapFile::TrapFile(const std::string& trapFilePath) {
@@ -680,9 +814,8 @@ void TrapFile::dump(uint32_t flags, HANDPARMS) {
   }
 }
 
-void IBMSignalHandler::setPrestoServer(
-    facebook::presto::PrestoServer* prestoServer) {
-  prestoServer_ = prestoServer;
+void IBMSignalHandler::setTaskManager(TaskManager* taskManager) {
+  taskManager_ = taskManager;
 }
 
 folly::Singleton<IBMSignalHandler> signalHandler([]() -> IBMSignalHandler* {

@@ -260,11 +260,6 @@ void PrestoServer::run() {
   initializeThreadPools();
 
   auto catalogNames = registerVeloxConnectors(fs::path(configDirectoryPath_));
-  auto ibmSignalHandler =
-      folly::Singleton<facebook::presto::process::IBMSignalHandler>::try_get();
-  if (ibmSignalHandler) {
-    ibmSignalHandler->setPrestoServer(this);
-  }
 
   const bool bindToNodeInternalAddressOnly =
       systemConfig->httpServerBindToNodeInternalAddressOnlyEnabled();
@@ -480,6 +475,12 @@ void PrestoServer::run() {
   prestoServerOperations_ =
       std::make_unique<PrestoServerOperations>(taskManager_.get(), this);
   registerSystemConnector();
+
+  auto ibmSignalHandler =
+      folly::Singleton<facebook::presto::process::IBMSignalHandler>::try_get();
+  if (ibmSignalHandler) {
+    ibmSignalHandler->setTaskManager(taskManager_.get());
+  }
 
   // The endpoint used by operation in production.
   httpServer_->registerGet(

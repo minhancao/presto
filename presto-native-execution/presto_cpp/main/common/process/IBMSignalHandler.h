@@ -22,7 +22,7 @@
 #include <cstdarg> // For valist.
 #include <cstdint> // For uint32_t.
 #include <string>
-#include "presto_cpp/main/PrestoServer.h"
+#include "presto_cpp/main/TaskManager.h"
 #include "velox/common/file/File.h"
 #include "velox/common/file/FileSystems.h"
 
@@ -108,17 +108,34 @@ typedef Uint UintPtr;
 
 class IBMSignalHandler {
  public:
-  explicit IBMSignalHandler();
-  void setPrestoServer(facebook::presto::PrestoServer* prestoServer);
+  IBMSignalHandler();
+  ~IBMSignalHandler();
+  void setTaskManager(TaskManager* taskManager);
+  void abortAndDeleteTasks(long linuxTid, int signum);
 
  private:
   void registerSignalHandler(int signo);
+  void cleanupThreadFunc();
+  void notifySignal();
+
   static void detailedSignalHandler(int signum, siginfo_t* info, void* context);
 
  private:
   // Atomic boolean flag to ensure signal handler is not recursively called.
-  static std::atomic<bool> isHandlingSignal;
-  static facebook::presto::PrestoServer* prestoServer_;
+  static std::atomic<bool> isHandlingSignal_;
+  static void* currentRip_;
+
+  TaskManager* taskManager_;
+  std::thread cleanupThread_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool stopCleanupThread_;
+  bool signalReceived_;
+
+  std::atomic<bool> alreadyHandling_{false};
+
+  static pid_t linuxTid_;
+  static std::string signalStr_;
 };
 
 class TrapFile {
