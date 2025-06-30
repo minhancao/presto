@@ -109,9 +109,8 @@ typedef Uint UintPtr;
 class IBMSignalHandler {
  public:
   IBMSignalHandler();
-  ~IBMSignalHandler();
   void setTaskManager(TaskManager* taskManager);
-  void abortAndDeleteTasks(long linuxTid, int signum);
+  void printTaskInfo(long linuxTid, int signum);
 
  private:
   void registerSignalHandler(int signo);
@@ -123,19 +122,7 @@ class IBMSignalHandler {
  private:
   // Atomic boolean flag to ensure signal handler is not recursively called.
   static std::atomic<bool> isHandlingSignal_;
-  static void* currentRip_;
-
-  TaskManager* taskManager_;
-  std::thread cleanupThread_;
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  bool stopCleanupThread_;
-  bool signalReceived_;
-
-  std::atomic<bool> alreadyHandling_{false};
-
-  static pid_t linuxTid_;
-  static std::string signalStr_;
+  static TaskManager* taskManager_;
 };
 
 class TrapFile {
