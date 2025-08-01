@@ -262,7 +262,7 @@ SystemConfig::SystemConfig() {
           NUM_PROP(kRequestDataSizesMaxWaitSec, 10),
           STR_PROP(kPluginDir, ""),
           NUM_PROP(kAbandonBuildNoDupHashMinRows, 100'000),
-          NUM_PROP(kAbandonBuildNoDupHashMinPct, 0),
+          NUM_PROP(kAbandonBuildNoDupHashMinPct, 100),
       };
 }
 
