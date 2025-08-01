@@ -750,6 +750,13 @@ class SystemConfig : public ConfigBase {
   static constexpr std::string_view kRequestDataSizesMaxWaitSec{
     "exchange.http-client.request-data-sizes-max-wait-sec"};
 
+  static constexpr std::string_view kAbandonBuildNoDupHashMinRows{
+    "abandon_build_no_dup_hash_min_rows"
+  };
+  static constexpr std::string_view kAbandonBuildNoDupHashMinPct{
+    "abandon_build_no_dup_hash_min_pct"
+  };
+
   SystemConfig();
 
   virtual ~SystemConfig() = default;
@@ -1024,6 +1031,10 @@ class SystemConfig : public ConfigBase {
   bool orderBySpillEnabled() const;
 
   int requestDataSizesMaxWaitSec() const;
+
+  int abandonBuildNoDupHashMinRow() const;
+
+  int abandonBuildNoDupHashMinPct() const;
 
   std::string pluginDir() const;
 };

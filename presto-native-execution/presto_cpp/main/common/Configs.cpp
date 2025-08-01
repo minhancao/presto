@@ -261,6 +261,8 @@ SystemConfig::SystemConfig() {
           BOOL_PROP(kOrderBySpillEnabled, true),
           NUM_PROP(kRequestDataSizesMaxWaitSec, 10),
           STR_PROP(kPluginDir, ""),
+          NUM_PROP(kAbandonBuildNoDupHashMinRows, 100'000),
+          NUM_PROP(kAbandonBuildNoDupHashMinPct, 0),
       };
 }
 
@@ -342,6 +344,14 @@ bool SystemConfig::orderBySpillEnabled() const {
 
 int SystemConfig::requestDataSizesMaxWaitSec() const {
   return optionalProperty<int>(kRequestDataSizesMaxWaitSec).value();
+}
+
+int SystemConfig::abandonBuildNoDupHashMinRow() const {
+  return optionalProperty<int>(kAbandonBuildNoDupHashMinRows).value();
+}
+
+int SystemConfig::abandonBuildNoDupHashMinPct() const {
+  return optionalProperty<int>(kAbandonBuildNoDupHashMinPct).value();
 }
 
 bool SystemConfig::mutableConfig() const {
@@ -995,6 +1005,12 @@ BaseVeloxQueryConfig::BaseVeloxQueryConfig() {
               QueryConfig::kAbandonPartialAggregationMinPct,
               c.abandonPartialAggregationMinPct()),
           NUM_PROP(
+              QueryConfig::kAbandonBuildNoDupHashMinRows,
+              c.abandonBuildNoDupHashMinRows()),
+          NUM_PROP(
+              QueryConfig::kAbandonBuildNoDupHashMinPct,
+              c.abandonBuildNoDupHashMinPct()),
+          NUM_PROP(
               QueryConfig::kMaxPartitionedOutputBufferSize,
               c.maxPartitionedOutputBufferSize()),
           NUM_PROP(
@@ -1069,6 +1085,17 @@ void BaseVeloxQueryConfig::updateLoadedValues(
   if (taskPartitionedWriterCount.has_value()) {
     updatedValues[QueryConfig::kTaskPartitionedWriterCount] =
         std::to_string(taskPartitionedWriterCount.value());
+  }
+
+  auto abandonBuildNoDupHashMinRows = systemConfig->abandonBuildNoDupHashMinRow();
+  if (abandonBuildNoDupHashMinRows) {
+    updatedValues[QueryConfig::kAbandonBuildNoDupHashMinRows] =
+        std::to_string(abandonBuildNoDupHashMinRows);
+  }
+  auto abandonBuildNoDupHashMinPct = systemConfig->abandonBuildNoDupHashMinPct();
+  if (abandonBuildNoDupHashMinPct) {
+    updatedValues[QueryConfig::kAbandonBuildNoDupHashMinPct] =
+        std::to_string(abandonBuildNoDupHashMinPct);
   }
 
   std::stringstream updated;
