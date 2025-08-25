@@ -917,7 +917,7 @@
             <dependency>
                 <groupId>com.facebook.presto</groupId>
                 <artifactId>presto-spark-classloader-spark${dep.pos.classloader.module-name.suffix}</artifactId>
-                <version>${project.version}</version>
+                <version>0.293</version>
             </dependency>
 
             <dependency>
