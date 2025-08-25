@@ -3,7 +3,7 @@
     <parent>
         <artifactId>presto-root</artifactId>
         <groupId>com.facebook.presto</groupId>
-        <version>0.295-SNAPSHOT</version>
+        <version>0.293</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -26,6 +26,7 @@
         <dependency>
             <groupId>com.facebook.presto</groupId>
             <artifactId>presto-spark-classloader-spark${dep.pos.classloader.module-name.suffix}</artifactId>
+            <version>0.293</version>
         </dependency>
 
         <dependency>
@@ -36,6 +37,7 @@
         <dependency>
             <groupId>com.facebook.airlift</groupId>
             <artifactId>units</artifactId>
+            <version>${dep.airlift.version}</version>
         </dependency>
     </dependencies>
 

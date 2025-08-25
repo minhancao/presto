@@ -495,7 +495,7 @@
         <dependency>
             <groupId>com.facebook.presto</groupId>
             <artifactId>presto-spark-classloader-interface</artifactId>
-            <version>${project.version}</version>
+            <version>0.293</version>
             <scope>compile</scope>
         </dependency>
 
